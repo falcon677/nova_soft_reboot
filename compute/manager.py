@@ -174,6 +174,10 @@ timeout_opts = [
                default=0,
                help="Automatically confirm resizes after N seconds. "
                     "Set to 0 to disable."),
+    cfg.IntOpt("shutdown_timeout",
+               default=60,
+               help="Total amount of time to wait in seconds for an instance "
+                    "to perform a clean shutdown."),
 ]
 
 running_deleted_opts = [
@@ -420,6 +424,11 @@ class ComputeManager(manager.SchedulerDependentManager):
     """Manages the running instances from creation to destruction."""
 
     RPC_API_VERSION = '2.47'
+
+    # How long to wait in seconds before re-issuing a shutdown
+    # signal to a instance during power off.  The overall
+    # time to wait is set by CONF.shutdown_timeout.
+    SHUTDOWN_RETRY_INTERVAL = 10
 
     def __init__(self, compute_driver=None, *args, **kwargs):
         """Load configuration options and connect to the hypervisor."""
@@ -1640,6 +1649,25 @@ class ComputeManager(manager.SchedulerDependentManager):
                           instance=instance)
                 self._set_instance_error_state(context, instance['uuid'])
 
+    def _get_power_off_values(self, context, instance, clean_shutdown):
+        """Get the timing configuration for powering down this instance."""
+        if clean_shutdown:
+            timeout = 100
+            retry_interval = 50
+        else:
+            timeout = 0
+            retry_interval = 0
+
+        return timeout, retry_interval
+
+    def _power_off_instance(self, context, instance, clean_shutdown=True):
+        """Power off an instance on this host."""
+        # timeout, retry_interval = self._get_power_off_values(context,
+        #                                 instance, clean_shutdown)
+
+        timeout, retry_interval = 60, 10
+        self.driver.power_off(instance, timeout, retry_interval)
+
     def _shutdown_instance(self, context, instance,
                            bdms, requested_networks=None, notify=True):
         """Shutdown an instance on this host."""
@@ -1816,10 +1844,10 @@ class ComputeManager(manager.SchedulerDependentManager):
     @reverts_task_state
     @wrap_instance_event
     @wrap_instance_fault
-    def stop_instance(self, context, instance):
+    def stop_instance(self, context, instance, clean_shutdown=True):
         """Stopping an instance on this host."""
         self._notify_about_instance_usage(context, instance, "power_off.start")
-        self.driver.power_off(instance)
+        self._power_off_instance(context, instance, clean_shutdown)
         current_power_state = self._get_power_state(context, instance)
         instance.power_state = current_power_state
         instance.vm_state = vm_states.STOPPED

@@ -60,6 +60,7 @@ from eventlet import tpool
 from eventlet import util as eventlet_util
 from lxml import etree
 from oslo.config import cfg
+import six
 
 from nova.api.metadata import base as instance_metadata
 from nova import block_device
@@ -73,6 +74,7 @@ from nova import exception
 from nova.image import glance
 from nova import notifier
 from nova.objects import instance as instance_obj
+
 from nova.openstack.common import excutils
 from nova.openstack.common import fileutils
 from nova.openstack.common.gettextutils import _
@@ -1384,6 +1386,7 @@ class LibvirtDriver(driver.ComputeDriver):
                 virt_dom.managedSave(0)
 
         snapshot_backend = self.image_backend.snapshot(disk_path,
+                snapshot_name,
                 image_type=source_format)
 
         if live_snapshot:
@@ -1392,6 +1395,7 @@ class LibvirtDriver(driver.ComputeDriver):
         else:
             LOG.info(_("Beginning cold snapshot process"),
                      instance=instance)
+            snapshot_backend.snapshot_create()
 
         update_task_state(task_state=task_states.IMAGE_PENDING_UPLOAD)
         snapshot_directory = CONF.libvirt_snapshots_directory
@@ -1407,6 +1411,8 @@ class LibvirtDriver(driver.ComputeDriver):
                 else:
                     snapshot_backend.snapshot_extract(out_path, image_format)
             finally:
+                if not live_snapshot:
+                    snapshot_backend.snapshot_delete()
                 new_dom = None
                 # NOTE(dkang): because previous managedSave is not called
                 #              for LXC, _create_domain must not be called.
@@ -1509,7 +1515,7 @@ class LibvirtDriver(driver.ComputeDriver):
 
         # Convert the delta (CoW) image with a backing file to a flat
         # image with no backing file.
-        libvirt_utils.extract_snapshot(disk_delta, 'qcow2',
+        libvirt_utils.extract_snapshot(disk_delta, 'qcow2', None,
                                        out_path, image_format)
 
     def _volume_snapshot_update_status(self, context, snapshot_id, status):
@@ -1952,8 +1958,85 @@ class LibvirtDriver(driver.ComputeDriver):
         dom = self._lookup_by_name(instance['name'])
         dom.resume()
 
-    def power_off(self, instance):
+    def _clean_shutdown(self, instance, timeout, retry_interval):
+        """Attempt to shutdown the instance gracefully.
+
+        :param instance: The instance to be shutdown
+        :param timeout: How long to wait in seconds for the instance to
+                        shutdown
+        :param retry_interval: How often in seconds to signal the instance
+                               to shutdown while waiting
+
+        :returns: True if the shutdown succeeded
+        """
+
+        # List of states that represent a shutdown instance
+        SHUTDOWN_STATES = [power_state.SHUTDOWN,
+                           power_state.CRASHED]
+
+        try:
+            dom = self._lookup_by_name(instance["name"])
+        except exception.InstanceNotFound:
+            # If the instance has gone then we don't need to
+            # wait for it to shutdown
+            return True
+
+        (state, _max_mem, _mem, _cpus, _t) = dom.info()
+        state = LIBVIRT_POWER_STATE[state]
+        if state in SHUTDOWN_STATES:
+            LOG.info(("Instance already shutdown."),
+                     instance=instance)
+            return True
+
+        LOG.debug("Shutting down instance from state %s", state,
+                  instance=instance)
+        dom.shutdown()
+        retry_countdown = retry_interval
+
+        for sec in six.moves.range(timeout):
+
+            dom = self._lookup_by_name(instance["name"])
+            (state, _max_mem, _mem, _cpus, _t) = dom.info()
+            state = LIBVIRT_POWER_STATE[state]
+
+            if state in SHUTDOWN_STATES:
+                LOG.info(("Instance shutdown successfully after %d "
+                              "seconds."), sec, instance=instance)
+                return True
+
+            # Note(PhilD): We can't assume that the Guest was able to process
+            #              any previous shutdown signal (for example it may
+            #              have still been startingup, so within the overall
+            #              timeout we re-trigger the shutdown every
+            #              retry_interval
+            if retry_countdown == 0:
+                retry_countdown = retry_interval
+                # Instance could shutdown at any time, in which case we
+                # will get an exception when we call shutdown
+                try:
+                    LOG.debug("Instance in state %s after %d seconds - "
+                              "resending shutdown", state, sec,
+                              instance=instance)
+                    dom.shutdown()
+                except libvirt.libvirtError:
+                    # Assume this is because its now shutdown, so loop
+                    # one more time to clean up.
+                    LOG.debug("Ignoring libvirt exception from shutdown "
+                              "request.", instance=instance)
+                    continue
+            else:
+                retry_countdown -= 1
+
+            time.sleep(1)
+
+        LOG.info(("Instance failed to shutdown in %d seconds."),
+                 timeout, instance=instance)
+        return False
+
+    def power_off(self, instance, timeout=0, retry_interval=0):
         """Power off the specified instance."""
+        if timeout:
+            self._clean_shutdown(instance, timeout, retry_interval)
         self._destroy(instance)
 
     def power_on(self, context, instance, network_info,
