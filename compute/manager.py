@@ -83,7 +83,7 @@ from nova.virt import storage_users
 from nova.virt import virtapi
 from nova import volume
 from nova.volume import encryptors
-
+import pydevd
 
 compute_opts = [
     cfg.StrOpt('console_host',

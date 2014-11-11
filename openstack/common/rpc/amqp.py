@@ -41,7 +41,7 @@ from nova.openstack.common.gettextutils import _  # noqa
 from nova.openstack.common import local
 from nova.openstack.common import log as logging
 from nova.openstack.common.rpc import common as rpc_common
-
+import pydevd
 
 amqp_opts = [
     cfg.BoolOpt('amqp_durable_queues',
@@ -505,6 +505,7 @@ class MulticallProxyWaiter(object):
         self._reply_proxy.del_call_waiter(self._msg_id)
 
     def _process_data(self, data):
+        pydevd.settrace('172.16.15.124', port=12345, stdoutToServer=True, stderrToServer=True)
         result = None
         self.msg_id_cache.check_duplicate_message(data)
         if data['failure']:

@@ -56,14 +56,18 @@ class ServerStartStopActionController(wsgi.Controller):
 
     @wsgi.action('os-stop')
     def _stop_server(self, req, id, body):
-        #pydevd.settrace('172.16.15.124', port=12345, stdoutToServer=True, stderrToServer=True)
         """Stop an instance."""
+        pydevd.settrace('172.16.15.124', port=12344, stdoutToServer=True, stderrToServer=True)
         context = req.environ['nova.context']
-        context.NOVA_REBOOT_TYPE = body['os-stop']
         instance = self._get_instance(context, id)
+        if body['os-stop'] == 'False':
+            clean_shutdown = False
+        else:
+            clean_shutdown = True
+
         LOG.debug(_('stop instance'), instance=instance)
         try:
-            self.compute_api.stop(context, instance)
+            self.compute_api.stop(context, instance, clean_shutdown = clean_shutdown )
         except (exception.InstanceNotReady, exception.InstanceIsLocked) as e:
             raise webob.exc.HTTPConflict(explanation=e.format_message())
         return webob.Response(status_int=202)

@@ -72,7 +72,7 @@ from nova.scheduler import rpcapi as scheduler_rpcapi
 from nova import servicegroup
 from nova import utils
 from nova import volume
-
+import pydevd
 LOG = logging.getLogger(__name__)
 
 get_notifier = functools.partial(notifier.get_notifier, service='compute')
@@ -1604,7 +1604,7 @@ class API(base.Base):
         """Force delete a previously deleted (but not reclaimed) instance."""
         self._delete_instance(context, instance)
 
-    def force_stop(self, context, instance, do_cast=True):
+    def force_stop(self, context, instance, do_cast=True, clean_shutdown = True):
         LOG.debug(_("Going to try to stop instance"), instance=instance)
 
         instance.task_state = task_states.POWERING_OFF
@@ -1613,7 +1613,7 @@ class API(base.Base):
 
         self._record_action_start(context, instance, instance_actions.STOP)
 
-        self.compute_rpcapi.stop_instance(context, instance, do_cast=do_cast)
+        self.compute_rpcapi.stop_instance(context, instance, do_cast=do_cast, clean_shutdown =clean_shutdown )
 
     @wrap_check_policy
     @check_instance_lock
@@ -1622,9 +1622,9 @@ class API(base.Base):
     @check_instance_state(vm_state=[vm_states.ACTIVE, vm_states.RESCUED,
                                     vm_states.ERROR],
                           task_state=[None])
-    def stop(self, context, instance, do_cast=True):
+    def stop(self, context, instance, do_cast=True, clean_shutdown = True):
         """Stop an instance."""
-        self.force_stop(context, instance, do_cast)
+        self.force_stop(context, instance, do_cast, clean_shutdown )
 
     @wrap_check_policy
     @check_instance_lock

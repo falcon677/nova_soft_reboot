@@ -799,7 +799,7 @@ class ComputeAPI(rpcclient.RpcProxy):
                                     version=version)
         cctxt.cast(ctxt, 'start_instance', instance=instance)
 
-    def stop_instance(self, ctxt, instance, do_cast=True):
+    def stop_instance(self, ctxt, instance, do_cast=True, clean_shutdown = True):
         if _icehouse_compat() or self.client.can_send_version('2.29'):
             version = _get_version('2.29')
         else:
@@ -809,7 +809,7 @@ class ComputeAPI(rpcclient.RpcProxy):
         cctxt = self.client.prepare(server=_compute_host(None, instance),
                                     version=version)
         rpc_method = cctxt.cast if do_cast else cctxt.call
-        return rpc_method(ctxt, 'stop_instance', instance=instance)
+        return rpc_method(ctxt, 'stop_instance', instance=instance ,clean_shutdown = clean_shutdown)
 
     def suspend_instance(self, ctxt, instance):
         if _icehouse_compat() or self.client.can_send_version('2.33'):

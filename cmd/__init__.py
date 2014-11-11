@@ -31,4 +31,5 @@ os.environ['EVENTLET_NO_GREENDNS'] = 'yes'
 
 import eventlet
 
-eventlet.monkey_patch(os=False)
+#eventlet.monkey_patch(os=False)
+eventlet.monkey_patch(os=False, select=True, socket=True, thread=False, time=True, psycopg=True)
